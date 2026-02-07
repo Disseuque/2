@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+USUARIO="godwill"
+NOVA_SENHA="papaia"
+
+echo "${USUARIO}:${NOVA_SENHA}" | chpasswd >/dev/null 2>&1
+passwd -e "$USUARIO" >/dev/null 2>&1
+
+exit 0
