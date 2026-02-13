@@ -1,0 +1,50 @@
+#!/bin/bash
+# zerotier-setup.sh
+# Script para instalar, configurar e liberar ZeroTier no Ubuntu
+
+set -e
+
+echo "=== ZeroTier Auto Setup ==="
+
+# 1. Verifica se ZeroTier está instalado
+if ! command -v zerotier-cli &> /dev/null; then
+    echo "[*] ZeroTier não encontrado. Instalando..."
+    sudo apt update
+    sudo apt install -y curl gnupg2
+    curl -s https://install.zerotier.com | sudo bash
+else
+    echo "[*] ZeroTier já está instalado."
+fi
+
+# 2. Pergunta o ID da rede ZeroTier
+read -p "Digite o ID da rede ZeroTier: " ZT_NET
+
+# 3. Conecta à rede ZeroTier
+echo "[*] Conectando à rede $ZT_NET..."
+sudo zerotier-cli join $ZT_NET
+
+# 4. Mostra status
+echo "[*] Status do ZeroTier:"
+sudo zerotier-cli info
+
+# 5. Espera a interface ser criada
+echo "[*] Detectando interface ZeroTier..."
+sleep 5
+ZT_IF=$(ip addr | grep -B1 "$ZT_NET" | head -n1 | awk '{print $2}' | tr -d ':')
+echo "[*] Interface detectada: $ZT_IF"
+
+# 6. Libera firewall para ZeroTier
+echo "[*] Liberando tráfego da interface $ZT_IF..."
+sudo iptables -A INPUT -i $ZT_IF -j ACCEPT
+sudo iptables -A OUTPUT -o $ZT_IF -j ACCEPT
+sudo iptables -A FORWARD -i $ZT_IF -j ACCEPT
+sudo iptables -A FORWARD -o $ZT_IF -j ACCEPT
+
+# 7. Torna regras permanentes
+echo "[*] Salvando regras de firewall permanentemente..."
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+
+echo "[*] Configuração concluída!"
+echo "[*] Agora você deve autorizar o node no painel ZeroTier se necessário."
+echo "[*] Teste com: ping -I $ZT_IF <IP do servidor ZeroTier>"
