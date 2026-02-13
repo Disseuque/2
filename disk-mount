@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script: disco-car.sh
+# disco-car.sh
 # Super Cool Disco NTFS Manager - Hacker Style
 # Autor: Disseuque
 
@@ -8,23 +8,29 @@ set -e
 # Cabeçalho hacker
 clear
 echo "====================================="
-echo "   Disseuque - Disk CAR   "
+echo "    Disseuque - Disk CAR   "
 echo "====================================="
 echo ""
 
-# Função para listar discos e status
+# Função para listar discos NTFS
 listar_discos() {
     echo "[*] Detectando discos NTFS..."
     lsblk -f -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL | grep -E "ntfs|NTFS" || echo "Nenhum disco NTFS encontrado."
     echo ""
 }
 
-# Lista discos não montados e apenas leitura
+# Função para status dos discos
 listar_discos_status() {
     echo "[*] Status dos discos:"
     for d in $(lsblk -ln -o NAME,FSTYPE | grep -i ntfs | awk '{print $1}'); do
         mp=$(lsblk -no MOUNTPOINT /dev/$d)
-        ro=$(cat /sys/block/${d%%[0-9]*}/ro)
+        # Detecta bloco base correto (NVMe ou SATA)
+        if [[ $d == nvme* ]]; then
+            block=$(echo $d | grep -o '^[^p]*')  # ex: nvme0n1p3 -> nvme0n1
+        else
+            block=${d%%[0-9]*}                  # ex: sda1 -> sda
+        fi
+        ro=$(cat /sys/block/$block/ro 2>/dev/null || echo 0)
         if [ -z "$mp" ]; then
             echo " - /dev/$d [NAO MONTADO] $( [ "$ro" -eq 1 ] && echo '(READ-ONLY)' || echo '(READ/WRITE)')"
         else
@@ -36,7 +42,7 @@ listar_discos_status() {
 
 # Função de montagem interativa
 montar_disco() {
-    echo "[*] Escolha o disco para montar (ex: sdb1): "
+    echo "[*] Escolha o disco para montar (ex: sdb1, nvme0n1p3): "
     read DISCO
     DISCO_PATH="/dev/$DISCO"
 
@@ -81,5 +87,5 @@ done
 
 echo ""
 echo "====================================="
-echo "   Tudo pronto, Disseuque !     "
+echo "   Tudo pronto, Disseuque Style!     "
 echo "====================================="
