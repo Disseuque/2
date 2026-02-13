@@ -8,7 +8,7 @@ set -e
 # Cabeçalho hacker
 clear
 echo "====================================="
-echo "    Disseuque - Disk CAR   "
+echo "   Super Cool Disseuque - Disk CAR   "
 echo "====================================="
 echo ""
 
@@ -19,17 +19,24 @@ listar_discos() {
     echo ""
 }
 
+# Função para detectar bloco base (NVMe ou SATA)
+get_block_base() {
+    local dev="$1"
+    if [[ "$dev" == nvme* ]]; then
+        # NVMe: nvme0n1p3 -> nvme0n1
+        echo "$dev" | grep -o '^[^p]*'
+    else
+        # SATA/HD: sda1 -> sda
+        echo "${dev%%[0-9]*}"
+    fi
+}
+
 # Função para status dos discos
 listar_discos_status() {
     echo "[*] Status dos discos:"
     for d in $(lsblk -ln -o NAME,FSTYPE | grep -i ntfs | awk '{print $1}'); do
         mp=$(lsblk -no MOUNTPOINT /dev/$d)
-        # Detecta bloco base correto (NVMe ou SATA)
-        if [[ $d == nvme* ]]; then
-            block=$(echo $d | grep -o '^[^p]*')  # ex: nvme0n1p3 -> nvme0n1
-        else
-            block=${d%%[0-9]*}                  # ex: sda1 -> sda
-        fi
+        block=$(get_block_base $d)
         ro=$(cat /sys/block/$block/ro 2>/dev/null || echo 0)
         if [ -z "$mp" ]; then
             echo " - /dev/$d [NAO MONTADO] $( [ "$ro" -eq 1 ] && echo '(READ-ONLY)' || echo '(READ/WRITE)')"
@@ -46,7 +53,7 @@ montar_disco() {
     read DISCO
     DISCO_PATH="/dev/$DISCO"
 
-    # Detecta ponto de montagem
+    # Cria ponto de montagem
     MOUNT_DIR="/mnt/$DISCO"
     if [ ! -d "$MOUNT_DIR" ]; then
         echo "[*] Criando pasta de montagem $MOUNT_DIR..."
