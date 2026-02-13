@@ -1,7 +1,7 @@
 #!/bin/bash
-# disco-car-safe.sh
+# disco-car-final.sh
 # Super Cool Disco NTFS Manager - Hacker Style
-# Versão segura e revisada
+# Versão final ultra-estável
 # Autor: Disseuque
 
 set -e
@@ -67,20 +67,24 @@ montar_disco() {
         echo "$((i+1))) /dev/${DISCOS_NM[$i]}"
     done
 
-    # Valida escolha do disco
+    # Loop de seleção do disco
     while true; do
         read -p "[*] Escolha o número do disco para montar: " ESC
         if [[ "$ESC" =~ ^[0-9]+$ ]] && [ "$ESC" -ge 1 ] && [ "$ESC" -le "${#DISCOS_NM[@]}" ]; then
             DISCO=${DISCOS_NM[$((ESC-1))]}
+            DISCO_PATH="/dev/$DISCO"
+            if [ ! -b "$DISCO_PATH" ]; then
+                echo "[!] /dev/$DISCO não existe ou não é um bloco válido. Tente novamente."
+                continue
+            fi
             break
         else
             echo "[!] Opção inválida, tente novamente."
         fi
     done
 
-    DISCO_PATH="/dev/$DISCO"
+    # Cria ponto de montagem
     MOUNT_DIR="/mnt/$DISCO"
-
     if [ ! -d "$MOUNT_DIR" ]; then
         echo "[*] Criando pasta de montagem $MOUNT_DIR..."
         sudo mkdir -p "$MOUNT_DIR"
@@ -91,7 +95,7 @@ montar_disco() {
         echo "[OK] Disco montado com sucesso em $MOUNT_DIR"
     else
         echo "[!] Falha na montagem normal."
-        # Opções interativas
+        # Loop para escolher opção de montagem
         while true; do
             echo "Escolha a opção:"
             echo "1) Somente leitura"
