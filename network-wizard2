@@ -1,0 +1,223 @@
+#!/bin/bash
+
+LOGFILE="/var/log/megashare.log"
+
+log() {
+    echo "$(date) - $1" >> $LOGFILE
+}
+
+clear
+
+echo -e "\e[32m"
+echo "███╗   ███╗███████╗ ██████╗  █████╗ "
+echo "████╗ ████║██╔════╝██╔════╝ ██╔══██╗"
+echo "██╔████╔██║█████╗  ██║  ███╗███████║"
+echo "██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║"
+echo "██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║"
+echo "╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝"
+echo ""
+echo "        >>> MEGA SHARE 3.0 <<<"
+echo -e "\e[0m"
+sleep 1
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Use:"
+    echo "curl ... | sudo bash"
+    exit 1
+fi
+
+# ======================
+# DETECTAR DISTRO
+# ======================
+
+if [ -f /etc/debian_version ]; then
+    DISTRO="debian"
+elif [ -f /etc/fedora-release ]; then
+    DISTRO="fedora"
+else
+    echo "Distro não suportada."
+    exit 1
+fi
+
+# ======================
+# INSTALAR SAMBA
+# ======================
+
+if ! command -v smbd &> /dev/null; then
+    if [ "$DISTRO" = "debian" ]; then
+        apt update
+        apt install -y samba
+    else
+        dnf install -y samba
+    fi
+    log "Samba instalado"
+fi
+
+systemctl enable smb 2>/dev/null
+systemctl enable smbd 2>/dev/null
+systemctl start smb 2>/dev/null
+systemctl start smbd 2>/dev/null
+
+# ======================
+# FIREWALL
+# ======================
+
+if command -v ufw &> /dev/null; then
+    ufw allow samba
+elif command -v firewall-cmd &> /dev/null; then
+    firewall-cmd --permanent --add-service=samba
+    firewall-cmd --reload
+fi
+
+# ======================
+# INFO
+# ======================
+
+IP=$(hostname -I | awk '{print $1}')
+HOSTNAME=$(hostname)
+
+# ======================
+# MENU PRINCIPAL
+# ======================
+
+while true; do
+clear
+echo "=============================="
+echo " MEGA SHARE 3.0 - MENU"
+echo "=============================="
+echo "1) Criar Compartilhamento"
+echo "2) Remover Compartilhamento"
+echo "3) Listar Compartilhamentos"
+echo "4) Criar Usuários Samba"
+echo "5) Sair"
+echo ""
+read -p "Escolha: " MENU
+
+case $MENU in
+
+1)
+    cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
+
+    CURRENT_DIR="/home"
+    SELECTED=()
+
+    while true; do
+        clear
+        echo "📂 Pasta atual: $CURRENT_DIR"
+        echo ""
+        DIRS=($(ls -d "$CURRENT_DIR"/*/ 2>/dev/null))
+        LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+
+        for i in "${!DIRS[@]}"; do
+            printf "%s) %s\n" "${LETTERS[$i]}" "$(basename "${DIRS[$i]}")"
+        done
+
+        echo ""
+        echo "s) Selecionar"
+        echo "v) Voltar"
+        echo "f) Finalizar"
+        read -p "Escolha: " OPT
+
+        if [ "$OPT" = "v" ]; then
+            CURRENT_DIR=$(dirname "$CURRENT_DIR")
+        elif [ "$OPT" = "s" ]; then
+            SELECTED+=("$CURRENT_DIR")
+        elif [ "$OPT" = "f" ]; then
+            break
+        else
+            for i in "${!LETTERS[@]}"; do
+                if [ "$OPT" = "${LETTERS[$i]}" ]; then
+                    CURRENT_DIR="${DIRS[$i]}"
+                fi
+            done
+        fi
+    done
+
+    for DIR in "${SELECTED[@]}"; do
+        NAME=$(basename "$DIR")
+
+cat >> /etc/samba/smb.conf <<EOF
+
+[$NAME]
+   path = $DIR
+   browseable = yes
+   writable = yes
+   guest ok = yes
+   read only = no
+EOF
+        log "Share criada: $NAME"
+    done
+
+    systemctl restart smb 2>/dev/null
+    systemctl restart smbd 2>/dev/null
+
+    echo "Criado com sucesso."
+    sleep 2
+;;
+
+2)
+    cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
+
+    SHARES=($(grep "^\[" /etc/samba/smb.conf | sed 's/\[//g' | sed 's/\]//g'))
+    LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+
+    echo "Compartilhamentos:"
+    for i in "${!SHARES[@]}"; do
+        printf "%s) %s\n" "${LETTERS[$i]}" "${SHARES[$i]}"
+    done
+
+    read -p "Escolha para remover: " REMOVE
+
+    for i in "${!LETTERS[@]}"; do
+        if [ "$REMOVE" = "${LETTERS[$i]}" ]; then
+            SHARE="${SHARES[$i]}"
+            sed -i "/^\[$SHARE\]/,/^$/d" /etc/samba/smb.conf
+            log "Share removida: $SHARE"
+        fi
+    done
+
+    systemctl restart smb 2>/dev/null
+    systemctl restart smbd 2>/dev/null
+
+    echo "Removido."
+    sleep 2
+;;
+
+3)
+    echo ""
+    echo "Compartilhamentos atuais:"
+    grep "^\[" /etc/samba/smb.conf
+    echo ""
+    read -p "Enter para voltar..."
+;;
+
+4)
+    while true; do
+        read -p "Criar novo usuário? (s/n): " UOPT
+        if [ "$UOPT" != "s" ]; then break; fi
+
+        read -p "Nome: " USERNAME
+
+        if ! id "$USERNAME" &>/dev/null; then
+            useradd -m "$USERNAME"
+            passwd "$USERNAME"
+        fi
+
+        smbpasswd -a "$USERNAME"
+        log "Usuário criado: $USERNAME"
+    done
+;;
+
+5)
+    echo "IP do servidor: $IP"
+    echo "Acesse via: \\\\$IP\\"
+    exit 0
+;;
+
+*)
+    echo "Opção inválida"
+    sleep 1
+;;
+
+esac
+done

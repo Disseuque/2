@@ -1,0 +1,206 @@
+#!/bin/bash
+
+clear
+
+echo -e "\e[32m"
+echo "███╗   ███╗███████╗ ██████╗  █████╗ "
+echo "████╗ ████║██╔════╝██╔════╝ ██╔══██╗"
+echo "██╔████╔██║█████╗  ██║  ███╗███████║"
+echo "██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║"
+echo "██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║"
+echo "╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝"
+echo ""
+echo "     >>> MEGA SHARE WIZARD v2.5 <<<"
+echo -e "\e[0m"
+sleep 1
+
+# ==========================
+# VERIFICAR ROOT
+# ==========================
+
+if [ "$EUID" -ne 0 ]; then
+    echo "[!] Execute com sudo:"
+    echo "curl ... | sudo bash"
+    exit 1
+fi
+
+# ==========================
+# DETECTAR DISTRO
+# ==========================
+
+if [ -f /etc/debian_version ]; then
+    DISTRO="debian"
+elif [ -f /etc/fedora-release ]; then
+    DISTRO="fedora"
+else
+    echo "Distro não suportada."
+    exit 1
+fi
+
+echo "[+] Sistema detectado: $DISTRO"
+
+# ==========================
+# INSTALAR SAMBA
+# ==========================
+
+if ! command -v smbd &> /dev/null; then
+    echo "[+] Instalando Samba..."
+    
+    if [ "$DISTRO" = "debian" ]; then
+        apt update
+        apt install -y samba
+    else
+        dnf install -y samba
+    fi
+fi
+
+systemctl enable smb 2>/dev/null
+systemctl enable smbd 2>/dev/null
+systemctl start smb 2>/dev/null
+systemctl start smbd 2>/dev/null
+
+# ==========================
+# FIREWALL
+# ==========================
+
+if command -v ufw &> /dev/null; then
+    ufw allow samba
+elif command -v firewall-cmd &> /dev/null; then
+    firewall-cmd --permanent --add-service=samba
+    firewall-cmd --reload
+fi
+
+# ==========================
+# INFO SISTEMA
+# ==========================
+
+HOSTNAME=$(hostname)
+IP=$(hostname -I | awk '{print $1}')
+
+echo ""
+echo "================================="
+echo " PC : $HOSTNAME"
+echo " IP : $IP"
+echo "================================="
+echo ""
+
+# ==========================
+# CRIAR USUÁRIOS
+# ==========================
+
+SAMBA_USERS=()
+
+while true; do
+    echo ""
+    read -p "Deseja criar usuário Samba? (s/n): " OPT
+    
+    if [ "$OPT" != "s" ]; then
+        break
+    fi
+
+    read -p "Nome do usuário: " USERNAME
+    
+    if ! id "$USERNAME" &>/dev/null; then
+        echo "[+] Criando usuário Linux..."
+        useradd -m "$USERNAME"
+        passwd "$USERNAME"
+    fi
+
+    smbpasswd -a "$USERNAME"
+    SAMBA_USERS+=("$USERNAME")
+
+done
+
+# Definir regra de acesso
+if [ ${#SAMBA_USERS[@]} -gt 0 ]; then
+    VALID_USERS="valid users = ${SAMBA_USERS[*]}"
+    GUEST="guest ok = no"
+else
+    VALID_USERS=""
+    GUEST="guest ok = yes"
+fi
+
+# ==========================
+# NAVEGADOR
+# ==========================
+
+CURRENT_DIR="/home"
+SELECTED=()
+
+browse() {
+while true; do
+    clear
+    echo "📂 Pasta atual: $CURRENT_DIR"
+    echo ""
+    
+    DIRS=($(ls -d "$CURRENT_DIR"/*/ 2>/dev/null))
+    LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+
+    for i in "${!DIRS[@]}"; do
+        printf "%s) %s\n" "${LETTERS[$i]}" "$(basename "${DIRS[$i]}")"
+    done
+    
+    echo ""
+    echo "s) Selecionar pasta atual"
+    echo "v) Voltar"
+    echo "f) Finalizar"
+    echo ""
+    read -p "Escolha: " OPTION
+    
+    if [ "$OPTION" = "v" ]; then
+        CURRENT_DIR=$(dirname "$CURRENT_DIR")
+    elif [ "$OPTION" = "s" ]; then
+        SELECTED+=("$CURRENT_DIR")
+        echo "[+] Adicionada!"
+        sleep 1
+    elif [ "$OPTION" = "f" ]; then
+        break
+    else
+        for i in "${!LETTERS[@]}"; do
+            if [ "$OPTION" = "${LETTERS[$i]}" ]; then
+                CURRENT_DIR="${DIRS[$i]}"
+            fi
+        done
+    fi
+done
+}
+
+browse
+
+# ==========================
+# BACKUP
+# ==========================
+
+cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
+
+# ==========================
+# CRIAR SHARES
+# ==========================
+
+for DIR in "${SELECTED[@]}"; do
+    NAME=$(basename "$DIR")
+
+cat >> /etc/samba/smb.conf <<EOF
+
+[$NAME]
+   path = $DIR
+   browseable = yes
+   writable = yes
+   read only = no
+   $GUEST
+   $VALID_USERS
+EOF
+
+done
+
+systemctl restart smb 2>/dev/null
+systemctl restart smbd 2>/dev/null
+
+echo ""
+echo -e "\e[32m[✓] Compartilhamento ATIVO\e[0m"
+echo ""
+echo "Acesse via:"
+echo ""
+echo "   \\\\$IP\\"
+echo ""
+echo ">>> MISSÃO CONCLUÍDA 😎"
