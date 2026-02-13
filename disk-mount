@@ -1,6 +1,7 @@
 #!/bin/bash
-# disco-car.sh
+# disco-car-safe.sh
 # Super Cool Disco NTFS Manager - Hacker Style
+# Versão segura e revisada
 # Autor: Disseuque
 
 set -e
@@ -12,13 +13,6 @@ echo "   Super Cool Disseuque - Disk CAR   "
 echo "====================================="
 echo ""
 
-# Função para listar discos NTFS
-listar_discos() {
-    echo "[*] Detectando discos NTFS..."
-    lsblk -f -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL | grep -E "ntfs|NTFS" || echo "Nenhum disco NTFS encontrado."
-    echo ""
-}
-
 # Função para detectar bloco base (NVMe ou SATA)
 get_block_base() {
     local dev="$1"
@@ -29,6 +23,13 @@ get_block_base() {
         # SATA/HD: sda1 -> sda
         echo "${dev%%[0-9]*}"
     fi
+}
+
+# Função para listar discos NTFS
+listar_discos() {
+    echo "[*] Detectando discos NTFS..."
+    lsblk -f -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL | grep -E "ntfs|NTFS" || echo "Nenhum disco NTFS encontrado."
+    echo ""
 }
 
 # Função para status dos discos
@@ -47,14 +48,39 @@ listar_discos_status() {
     echo ""
 }
 
-# Função de montagem interativa
+# Função para montar discos
 montar_disco() {
-    echo "[*] Escolha o disco para montar (ex: sdb1, nvme0n1p3): "
-    read DISCO
-    DISCO_PATH="/dev/$DISCO"
+    # Lista apenas discos não montados
+    DISCOS_NM=()
+    for d in $(lsblk -ln -o NAME,FSTYPE | grep -i ntfs | awk '{print $1}'); do
+        mp=$(lsblk -no MOUNTPOINT /dev/$d)
+        [ -z "$mp" ] && DISCOS_NM+=("$d")
+    done
 
-    # Cria ponto de montagem
+    if [ ${#DISCOS_NM[@]} -eq 0 ]; then
+        echo "[*] Nenhum disco NTFS não montado encontrado."
+        return
+    fi
+
+    echo "[*] Discos não montados disponíveis:"
+    for i in "${!DISCOS_NM[@]}"; do
+        echo "$((i+1))) /dev/${DISCOS_NM[$i]}"
+    done
+
+    # Valida escolha do disco
+    while true; do
+        read -p "[*] Escolha o número do disco para montar: " ESC
+        if [[ "$ESC" =~ ^[0-9]+$ ]] && [ "$ESC" -ge 1 ] && [ "$ESC" -le "${#DISCOS_NM[@]}" ]; then
+            DISCO=${DISCOS_NM[$((ESC-1))]}
+            break
+        else
+            echo "[!] Opção inválida, tente novamente."
+        fi
+    done
+
+    DISCO_PATH="/dev/$DISCO"
     MOUNT_DIR="/mnt/$DISCO"
+
     if [ ! -d "$MOUNT_DIR" ]; then
         echo "[*] Criando pasta de montagem $MOUNT_DIR..."
         sudo mkdir -p "$MOUNT_DIR"
@@ -65,20 +91,24 @@ montar_disco() {
         echo "[OK] Disco montado com sucesso em $MOUNT_DIR"
     else
         echo "[!] Falha na montagem normal."
-        echo "Escolha a opção:"
-        echo "1) Somente leitura"
-        echo "2) Forçada (remove hiberfile)"
-        read OPCAO
-        if [ "$OPCAO" == "1" ]; then
-            sudo mount -t ntfs-3g -o ro "$DISCO_PATH" "$MOUNT_DIR"
-            echo "[OK] Disco montado SOMENTE LEITURA em $MOUNT_DIR"
-        elif [ "$OPCAO" == "2" ]; then
-            sudo mount -t ntfs-3g -o remove_hiberfile "$DISCO_PATH" "$MOUNT_DIR"
-            echo "[OK] Disco montado FORÇADO (hiberfile removido) em $MOUNT_DIR"
-        else
-            echo "[!] Opção inválida. Abortando."
-            exit 1
-        fi
+        # Opções interativas
+        while true; do
+            echo "Escolha a opção:"
+            echo "1) Somente leitura"
+            echo "2) Forçada (remove hiberfile)"
+            read OPCAO
+            if [ "$OPCAO" == "1" ]; then
+                sudo mount -t ntfs-3g -o ro "$DISCO_PATH" "$MOUNT_DIR"
+                echo "[OK] Disco montado SOMENTE LEITURA em $MOUNT_DIR"
+                break
+            elif [ "$OPCAO" == "2" ]; then
+                sudo mount -t ntfs-3g -o remove_hiberfile "$DISCO_PATH" "$MOUNT_DIR"
+                echo "[OK] Disco montado FORÇADO (hiberfile removido) em $MOUNT_DIR"
+                break
+            else
+                echo "[!] Opção inválida, tente novamente."
+            fi
+        done
     fi
 }
 
