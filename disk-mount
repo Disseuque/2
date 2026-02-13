@@ -1,0 +1,85 @@
+#!/bin/bash
+# Script: disco-car.sh
+# Super Cool Disco NTFS Manager - Hacker Style
+# Autor: Disseuque
+
+set -e
+
+# Cabeçalho hacker
+clear
+echo "====================================="
+echo "   Disseuque - Disk CAR   "
+echo "====================================="
+echo ""
+
+# Função para listar discos e status
+listar_discos() {
+    echo "[*] Detectando discos NTFS..."
+    lsblk -f -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL | grep -E "ntfs|NTFS" || echo "Nenhum disco NTFS encontrado."
+    echo ""
+}
+
+# Lista discos não montados e apenas leitura
+listar_discos_status() {
+    echo "[*] Status dos discos:"
+    for d in $(lsblk -ln -o NAME,FSTYPE | grep -i ntfs | awk '{print $1}'); do
+        mp=$(lsblk -no MOUNTPOINT /dev/$d)
+        ro=$(cat /sys/block/${d%%[0-9]*}/ro)
+        if [ -z "$mp" ]; then
+            echo " - /dev/$d [NAO MONTADO] $( [ "$ro" -eq 1 ] && echo '(READ-ONLY)' || echo '(READ/WRITE)')"
+        else
+            echo " - /dev/$d [MONTADO EM $mp]"
+        fi
+    done
+    echo ""
+}
+
+# Função de montagem interativa
+montar_disco() {
+    echo "[*] Escolha o disco para montar (ex: sdb1): "
+    read DISCO
+    DISCO_PATH="/dev/$DISCO"
+
+    # Detecta ponto de montagem
+    MOUNT_DIR="/mnt/$DISCO"
+    if [ ! -d "$MOUNT_DIR" ]; then
+        echo "[*] Criando pasta de montagem $MOUNT_DIR..."
+        sudo mkdir -p "$MOUNT_DIR"
+    fi
+
+    echo "[*] Tentando montagem normal..."
+    if sudo mount -t ntfs-3g "$DISCO_PATH" "$MOUNT_DIR"; then
+        echo "[OK] Disco montado com sucesso em $MOUNT_DIR"
+    else
+        echo "[!] Falha na montagem normal."
+        echo "Escolha a opção:"
+        echo "1) Somente leitura"
+        echo "2) Forçada (remove hiberfile)"
+        read OPCAO
+        if [ "$OPCAO" == "1" ]; then
+            sudo mount -t ntfs-3g -o ro "$DISCO_PATH" "$MOUNT_DIR"
+            echo "[OK] Disco montado SOMENTE LEITURA em $MOUNT_DIR"
+        elif [ "$OPCAO" == "2" ]; then
+            sudo mount -t ntfs-3g -o remove_hiberfile "$DISCO_PATH" "$MOUNT_DIR"
+            echo "[OK] Disco montado FORÇADO (hiberfile removido) em $MOUNT_DIR"
+        else
+            echo "[!] Opção inválida. Abortando."
+            exit 1
+        fi
+    fi
+}
+
+# Loop principal
+while true; do
+    listar_discos
+    listar_discos_status
+    montar_disco
+    echo ""
+    read -p "Montar outro disco? (s/n): " RESP
+    [[ "$RESP" != "s" && "$RESP" != "S" ]] && break
+done
+
+echo ""
+echo "====================================="
+echo "   Tudo pronto, Disseuque !     "
+echo "====================================="
