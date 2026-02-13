@@ -1,34 +1,28 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 LOGFILE="/var/log/megashare.log"
 
 log() {
-    echo "$(date) - $1" >> $LOGFILE
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGFILE"
 }
 
-clear
+pause() {
+    read -p "Pressione Enter para continuar..."
+}
 
-echo -e "\e[32m"
-echo "███╗   ███╗███████╗ ██████╗  █████╗ "
-echo "████╗ ████║██╔════╝██╔════╝ ██╔══██╗"
-echo "██╔████╔██║█████╗  ██║  ███╗███████║"
-echo "██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║"
-echo "██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║"
-echo "╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝"
-echo ""
-echo "        >>> MEGA SHARE 3.0 <<<"
-echo -e "\e[0m"
-sleep 1
+# =============================
+# ROOT CHECK
+# =============================
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Use:"
+    echo "Execute com:"
     echo "curl ... | sudo bash"
     exit 1
 fi
 
-# ======================
+# =============================
 # DETECTAR DISTRO
-# ======================
+# =============================
 
 if [ -f /etc/debian_version ]; then
     DISTRO="debian"
@@ -39,14 +33,14 @@ else
     exit 1
 fi
 
-# ======================
+# =============================
 # INSTALAR SAMBA
-# ======================
+# =============================
 
 if ! command -v smbd &> /dev/null; then
+    echo "Instalando Samba..."
     if [ "$DISTRO" = "debian" ]; then
-        apt update
-        apt install -y samba
+        apt update && apt install -y samba
     else
         dnf install -y samba
     fi
@@ -58,32 +52,53 @@ systemctl enable smbd 2>/dev/null
 systemctl start smb 2>/dev/null
 systemctl start smbd 2>/dev/null
 
-# ======================
+# =============================
 # FIREWALL
-# ======================
+# =============================
 
 if command -v ufw &> /dev/null; then
-    ufw allow samba
+    ufw allow samba &>/dev/null
 elif command -v firewall-cmd &> /dev/null; then
-    firewall-cmd --permanent --add-service=samba
-    firewall-cmd --reload
+    firewall-cmd --permanent --add-service=samba &>/dev/null
+    firewall-cmd --reload &>/dev/null
 fi
 
-# ======================
-# INFO
-# ======================
-
 IP=$(hostname -I | awk '{print $1}')
-HOSTNAME=$(hostname)
 
-# ======================
+# =============================
+# FUNÇÃO LISTAR SHARES
+# =============================
+
+list_shares() {
+    grep "^\[" /etc/samba/smb.conf | grep -v "\[global\]" | sed 's/\[//;s/\]//'
+}
+
+# =============================
+# FUNÇÃO REMOVER SHARE
+# =============================
+
+remove_share_block() {
+    SHARE="$1"
+    awk -v share="$SHARE" '
+    BEGIN {skip=0}
+    /^\[/ {
+        if ($0 ~ "\\["share"\\]") {skip=1; next}
+        else {skip=0}
+    }
+    skip==0 {print}
+    ' /etc/samba/smb.conf > /etc/samba/smb.conf.tmp
+
+    mv /etc/samba/smb.conf.tmp /etc/samba/smb.conf
+}
+
+# =============================
 # MENU PRINCIPAL
-# ======================
+# =============================
 
 while true; do
 clear
 echo "=============================="
-echo " MEGA SHARE 3.0 - MENU"
+echo " MEGA SHARE 3.1 - MENU"
 echo "=============================="
 echo "1) Criar Compartilhamento"
 echo "2) Remover Compartilhamento"
@@ -91,50 +106,64 @@ echo "3) Listar Compartilhamentos"
 echo "4) Criar Usuários Samba"
 echo "5) Sair"
 echo ""
-read -p "Escolha: " MENU
+
+read -p "Escolha [1-5]: " MENU
+
+if ! [[ "$MENU" =~ ^[1-5]$ ]]; then
+    echo "Entrada inválida."
+    pause
+    continue
+fi
 
 case $MENU in
 
+# =================================
+# CRIAR COMPARTILHAMENTO
+# =================================
 1)
-    cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
 
-    CURRENT_DIR="/home"
-    SELECTED=()
+cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
 
-    while true; do
-        clear
-        echo "📂 Pasta atual: $CURRENT_DIR"
-        echo ""
-        DIRS=($(ls -d "$CURRENT_DIR"/*/ 2>/dev/null))
-        LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+CURRENT_DIR="/home"
+SELECTED=()
 
-        for i in "${!DIRS[@]}"; do
-            printf "%s) %s\n" "${LETTERS[$i]}" "$(basename "${DIRS[$i]}")"
-        done
+while true; do
+    clear
+    echo "Pasta atual: $CURRENT_DIR"
+    echo ""
 
-        echo ""
-        echo "s) Selecionar"
-        echo "v) Voltar"
-        echo "f) Finalizar"
-        read -p "Escolha: " OPT
+    mapfile -t DIRS < <(find "$CURRENT_DIR" -maxdepth 1 -type d 2>/dev/null | tail -n +2)
+    LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
 
-        if [ "$OPT" = "v" ]; then
-            CURRENT_DIR=$(dirname "$CURRENT_DIR")
-        elif [ "$OPT" = "s" ]; then
-            SELECTED+=("$CURRENT_DIR")
-        elif [ "$OPT" = "f" ]; then
-            break
-        else
-            for i in "${!LETTERS[@]}"; do
-                if [ "$OPT" = "${LETTERS[$i]}" ]; then
-                    CURRENT_DIR="${DIRS[$i]}"
-                fi
-            done
-        fi
+    for i in "${!DIRS[@]}"; do
+        printf "%s) %s\n" "${LETTERS[$i]}" "$(basename "${DIRS[$i]}")"
     done
 
-    for DIR in "${SELECTED[@]}"; do
-        NAME=$(basename "$DIR")
+    echo ""
+    echo "s) Selecionar pasta atual"
+    echo "v) Voltar"
+    echo "f) Finalizar"
+    echo ""
+
+    read -p "Escolha: " OPT
+
+    if [ "$OPT" = "v" ]; then
+        CURRENT_DIR=$(dirname "$CURRENT_DIR")
+    elif [ "$OPT" = "s" ]; then
+        SELECTED+=("$CURRENT_DIR")
+    elif [ "$OPT" = "f" ]; then
+        break
+    else
+        for i in "${!LETTERS[@]}"; do
+            if [ "$OPT" = "${LETTERS[$i]}" ]; then
+                CURRENT_DIR="${DIRS[$i]}"
+            fi
+        done
+    fi
+done
+
+for DIR in "${SELECTED[@]}"; do
+    NAME=$(basename "$DIR")
 
 cat >> /etc/samba/smb.conf <<EOF
 
@@ -145,78 +174,91 @@ cat >> /etc/samba/smb.conf <<EOF
    guest ok = yes
    read only = no
 EOF
-        log "Share criada: $NAME"
-    done
 
-    systemctl restart smb 2>/dev/null
-    systemctl restart smbd 2>/dev/null
+log "Share criada: $NAME"
+done
 
-    echo "Criado com sucesso."
-    sleep 2
+systemctl restart smb 2>/dev/null
+systemctl restart smbd 2>/dev/null
+
+echo "Compartilhamento criado."
+pause
 ;;
 
+# =================================
+# REMOVER COMPARTILHAMENTO
+# =================================
 2)
-    cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
 
-    SHARES=($(grep "^\[" /etc/samba/smb.conf | sed 's/\[//g' | sed 's/\]//g'))
-    LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
 
-    echo "Compartilhamentos:"
-    for i in "${!SHARES[@]}"; do
-        printf "%s) %s\n" "${LETTERS[$i]}" "${SHARES[$i]}"
-    done
+mapfile -t SHARES < <(list_shares)
 
-    read -p "Escolha para remover: " REMOVE
+if [ ${#SHARES[@]} -eq 0 ]; then
+    echo "Nenhum compartilhamento encontrado."
+    pause
+    continue
+fi
 
-    for i in "${!LETTERS[@]}"; do
-        if [ "$REMOVE" = "${LETTERS[$i]}" ]; then
-            SHARE="${SHARES[$i]}"
-            sed -i "/^\[$SHARE\]/,/^$/d" /etc/samba/smb.conf
-            log "Share removida: $SHARE"
-        fi
-    done
+LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
 
-    systemctl restart smb 2>/dev/null
-    systemctl restart smbd 2>/dev/null
+echo "Compartilhamentos:"
+for i in "${!SHARES[@]}"; do
+    printf "%s) %s\n" "${LETTERS[$i]}" "${SHARES[$i]}"
+done
 
-    echo "Removido."
-    sleep 2
+echo ""
+read -p "Escolha letra para remover: " REMOVE
+
+for i in "${!LETTERS[@]}"; do
+    if [ "$REMOVE" = "${LETTERS[$i]}" ]; then
+        SHARE="${SHARES[$i]}"
+        remove_share_block "$SHARE"
+        log "Share removida: $SHARE"
+        systemctl restart smb 2>/dev/null
+        systemctl restart smbd 2>/dev/null
+        echo "Removido com sucesso."
+        pause
+    fi
+done
 ;;
 
+# =================================
+# LISTAR
+# =================================
 3)
-    echo ""
-    echo "Compartilhamentos atuais:"
-    grep "^\[" /etc/samba/smb.conf
-    echo ""
-    read -p "Enter para voltar..."
+echo ""
+list_shares
+echo ""
+pause
 ;;
 
+# =================================
+# CRIAR USUÁRIOS
+# =================================
 4)
-    while true; do
-        read -p "Criar novo usuário? (s/n): " UOPT
-        if [ "$UOPT" != "s" ]; then break; fi
+while true; do
+    read -p "Criar novo usuário? (s/n): " UOPT
+    if [ "$UOPT" != "s" ]; then break; fi
 
-        read -p "Nome: " USERNAME
+    read -p "Nome: " USERNAME
 
-        if ! id "$USERNAME" &>/dev/null; then
-            useradd -m "$USERNAME"
-            passwd "$USERNAME"
-        fi
+    if ! id "$USERNAME" &>/dev/null; then
+        useradd -m "$USERNAME"
+        passwd "$USERNAME"
+    fi
 
-        smbpasswd -a "$USERNAME"
-        log "Usuário criado: $USERNAME"
-    done
+    smbpasswd -a "$USERNAME"
+    log "Usuário criado: $USERNAME"
+done
 ;;
 
+# =================================
+# SAIR
+# =================================
 5)
-    echo "IP do servidor: $IP"
-    echo "Acesse via: \\\\$IP\\"
-    exit 0
-;;
-
-*)
-    echo "Opção inválida"
-    sleep 1
+echo "Servidor disponível em: \\\\$IP\\"
+exit 0
 ;;
 
 esac
