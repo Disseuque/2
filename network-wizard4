@@ -1,0 +1,96 @@
+# =================================
+# CRIAR COMPARTILHAMENTO
+# =================================
+1)
+
+cp /etc/samba/smb.conf /etc/samba/smb.conf.bak
+
+CURRENT_DIR="/home"
+SELECTED=()
+
+while true; do
+    clear
+    echo "Pasta atual: $CURRENT_DIR"
+    echo ""
+
+    mapfile -t DIRS < <(find "$CURRENT_DIR" -maxdepth 1 -type d 2>/dev/null | tail -n +2)
+    LETTERS=(a b c d e f g h i j k l m n o p q r s t u v w x y z)
+
+    for i in "${!DIRS[@]}"; do
+        printf "%s) %s\n" "${LETTERS[$i]}" "$(basename "${DIRS[$i]}")"
+    done
+
+    echo ""
+    echo "n) Criar nova pasta aqui"
+    echo "s) Selecionar pasta atual"
+    echo "v) Voltar"
+    echo "f) Finalizar seleção"
+    echo ""
+
+    read -p "Escolha: " OPT
+
+    if [ "$OPT" = "v" ]; then
+        CURRENT_DIR=$(dirname "$CURRENT_DIR")
+    elif [ "$OPT" = "s" ]; then
+        SELECTED+=("$CURRENT_DIR")
+    elif [ "$OPT" = "f" ]; then
+        break
+    elif [ "$OPT" = "n" ]; then
+        read -p "Digite o nome da nova pasta: " NOVA
+        mkdir -p "$CURRENT_DIR/$NOVA"
+        CURRENT_DIR="$CURRENT_DIR/$NOVA"
+        echo "Pasta '$NOVA' criada."
+        pause
+    else
+        for i in "${!LETTERS[@]}"; do
+            if [ "$OPT" = "${LETTERS[$i]}" ]; then
+                CURRENT_DIR="${DIRS[$i]}"
+            fi
+        done
+    fi
+done
+
+# Criar os shares selecionados
+for DIR in "${SELECTED[@]}"; do
+    read -p "Digite o nome do share para '$DIR': " SHARENAME
+    echo "Deseja que o share seja protegido por senha? (s/n): "
+    read -r SECURE
+
+    if [ "$SECURE" = "s" ]; then
+        read -p "Digite o nome do usuário Samba (ou escolha existente): " SMBUSER
+        if ! id "$SMBUSER" &>/dev/null; then
+            read -s -p "Digite a senha para $SMBUSER: " SMBPASS
+            echo
+            useradd -m "$SMBUSER"
+            echo "$SMBUSER:$SMBPASS" | chpasswd
+            echo "$SMBPASS" | smbpasswd -s -a "$SMBUSER"
+        fi
+        GUEST="no"
+        VALID_USERS="$SMBUSER"
+    else
+        GUEST="yes"
+        VALID_USERS=""
+    fi
+
+    # Adicionar ao smb.conf
+    cat >> /etc/samba/smb.conf <<EOF
+
+[$SHARENAME]
+   path = $DIR
+   browseable = yes
+   writable = yes
+   guest ok = $GUEST
+EOF
+
+    if [ -n "$VALID_USERS" ]; then
+        echo "   valid users = $VALID_USERS" >> /etc/samba/smb.conf
+    fi
+
+    log "Share criada: $SHARENAME (Protegida: $SECURE)"
+done
+
+systemctl restart smb 2>/dev/null
+systemctl restart smbd 2>/dev/null
+
+echo "Compartilhamentos criados com sucesso."
+pause
